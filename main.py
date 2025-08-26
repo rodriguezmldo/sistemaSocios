@@ -447,16 +447,28 @@ class MainWindow(QMainWindow):
         if not self.sistema:
             QMessageBox.warning(self, "No inicializado", "Primero inicializa el sistema.")
             return
+
         nombre = self.edit_nombre.text().strip()
         tam = int(self.edit_tamano.value())
+
         if not nombre:
             QMessageBox.warning(self, "Dato faltante", "Ingresa un nombre para el proceso.")
             return
 
+        
+        if nombre in self.sistema.procesos_vigentes():
+            QMessageBox.warning(self, "Duplicado", f"Ya existe un proceso con el nombre '{nombre}'.")
+            return
+
         nodo = self.sistema.asignar_memoria(tam, nombre)
         if nodo is None:
-            QMessageBox.critical(self, "Sin espacio", "No se pudo asignar memoria al proceso (espacio insuficiente o fragmentación).")
+            QMessageBox.critical(
+                self, "Sin espacio",
+                "No se pudo asignar memoria al proceso (espacio insuficiente o fragmentación)."
+            )
+
         self.actualizar_ui()
+
 
     def on_liberar(self):
         if not self.sistema:
