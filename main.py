@@ -29,6 +29,33 @@ from PyQt6.QtWidgets import (
     QMessageBox, QComboBox, QFrame
 )
 
+from PyQt6.QtGui import QValidator
+import math
+
+class PowerOfTwoSpinBox(QSpinBox):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.setRange(1, 1_073_741_824)
+        self.setValue(1024)
+
+    def stepBy(self, steps: int) -> None:
+        val = self.value()
+        exp = int(round(math.log2(val)))
+        new_exp = exp + steps
+        new_exp = max(0, min(new_exp, 30))
+        self.setValue(2 ** new_exp)
+
+    def validate(self, text: str, pos: int):
+        try:
+            v = int(text)
+            if v > 0 and (v & (v - 1)) == 0:
+                return (QValidator.State.Acceptable, text, pos)
+            return (QValidator.State.Intermediate, text, pos)
+        except:
+            return (QValidator.State.Invalid, text, pos)
+
+
+
 # =========================
 #   LÓGICA DEL BUDDY SYSTEM
 # =========================
@@ -320,16 +347,14 @@ class MainWindow(QMainWindow):
         # --- Panel de inicialización ---
         init_group = QGroupBox("Inicialización del Sistema")
         f = QFormLayout()
-        self.spin_total = QSpinBox()
-        self.spin_total.setRange(1, 1_073_741_824)  # hasta 1 GB en unidades arbitrarias
+      # SpinBox especiales que avanzan en potencias de 2
+        self.spin_total = PowerOfTwoSpinBox()
         self.spin_total.setValue(1024)
-        self.spin_total.setSingleStep(1)
-        self.spin_total.setToolTip("Tamaño total de la memoria. Se ajustará a potencia de 2.")
+        self.spin_total.setToolTip("Tamaño total de la memoria (solo potencias de 2).")
 
-        self.spin_min = QSpinBox()
-        self.spin_min.setRange(1, 1_073_741_824)
+        self.spin_min = PowerOfTwoSpinBox()
         self.spin_min.setValue(32)
-        self.spin_min.setToolTip("Tamaño mínimo de bloque al dividir. Se ajustará a potencia de 2.")
+        self.spin_min.setToolTip("Tamaño mínimo de bloque (solo potencias de 2).")
 
         btn_init = QPushButton("Inicializar")
         btn_init.clicked.connect(self.on_inicializar)
