@@ -8,6 +8,7 @@ Características:
 - Eliminación de procesos desde una lista desplegable (ComboBox).
 - Visualización de la memoria como barras horizontales proporcionadas al tamaño de los bloques.
 - Muestra la fragmentación interna total (memoria desperdiciada).
+- Bloques buddies (socios) tienen el mismo color.
 
 Requisitos: PyQt6
     pip install PyQt6
@@ -18,9 +19,10 @@ Ejecutar:
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, List, Tuple
+import hashlib
 
 from PyQt6.QtCore import Qt, QRectF
-from PyQt6.QtGui import QPainter, QFont, QPen, QBrush
+from PyQt6.QtGui import QPainter, QFont, QPen, QBrush, QColor
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
     QDoubleSpinBox, QSpinBox, QLineEdit, QPushButton, QGroupBox, QLabel,
@@ -32,7 +34,7 @@ from PyQt6.QtWidgets import (
 # =========================
 
 class NodoMemoria:
-    def __init__(self, tamano: int):
+    def __init__(self, tamano: int, direccion: int = 0):
         # Cada nodo representa un bloque de memoria
         self.proceso: Optional[str] = None      # Nombre del proceso que ocupa este bloque
         self.ocupado: bool = False              # Indica si el bloque está en uso
@@ -41,12 +43,13 @@ class NodoMemoria:
         self.padre: Optional[NodoMemoria] = None
         self.hijoIzquierdo: Optional[NodoMemoria] = None
         self.hijoDerecho: Optional[NodoMemoria] = None
+        self.direccion: int = direccion         # Dirección base del bloque (para identificar buddies)
 
     def es_hoja(self) -> bool:
         return self.hijoIzquierdo is None and self.hijoDerecho is None
 
     def __repr__(self):
-        return f"<NodoMemoria tamano={self.tamano}, ocupado={self.ocupado}, proceso={self.proceso}>"
+        return f"<NodoMemoria tamano={self.tamano}, ocupado={self.ocupado}, proceso={self.proceso}, dir={self.direccion}>"
 
 
 class SistemaBuddy:
@@ -58,7 +61,7 @@ class SistemaBuddy:
             # Corrige caso extremo
             self.min_bloque = self.total
         # Árbol raíz
-        self.raiz = NodoMemoria(self.total)
+        self.raiz = NodoMemoria(self.total, 0)
 
     @staticmethod
     def es_potencia_de_2(x: int) -> bool:
@@ -74,8 +77,11 @@ class SistemaBuddy:
 
     def _dividir(self, nodo: NodoMemoria):
         mitad = nodo.tamano // 2
-        nodo.hijoIzquierdo = NodoMemoria(mitad)
-        nodo.hijoDerecho = NodoMemoria(mitad)
+        direccion_izq = nodo.direccion
+        direccion_der = nodo.direccion + mitad
+        
+        nodo.hijoIzquierdo = NodoMemoria(mitad, direccion_izq)
+        nodo.hijoDerecho = NodoMemoria(mitad, direccion_der)
         nodo.hijoIzquierdo.padre = nodo
         nodo.hijoDerecho.padre = nodo
 
@@ -192,6 +198,11 @@ class SistemaBuddy:
         _rec(self.raiz)
         return sorted(nombres)
 
+    def obtener_buddy_address(self, direccion: int, tamano: int) -> int:
+        """Calcula la dirección del buddy de un bloque"""
+        # El buddy de un bloque está en la misma posición XOR el tamaño del bloque
+        return direccion ^ tamano
+
 
 # =========================
 #   WIDGET DE DIBUJO (BARRAS)
@@ -204,6 +215,33 @@ class MemoriaView(QWidget):
         self.setMinimumHeight(180)
         self.setAutoFillBackground(True)
         self.setToolTip("Visualización de bloques: Ocupado=relleno, Libre=rayado. Borde indica tamaño del bloque.")
+        self.colores_buddies = {}  # Cache de colores para buddies
+
+    def obtener_color_para_bloque(self, nodo: NodoMemoria) -> QColor:
+        """Genera un color único para cada par de bloques buddies"""
+        # Para bloques libres, usar un color especial
+        if not nodo.ocupado:
+            return QColor(200, 200, 200)  # Gris para bloques libres
+        
+        # Calcular la dirección base del par de buddies
+        # Los buddies comparten la misma dirección base (la del bloque padre)
+        buddy_address = self.get_sistema().obtener_buddy_address(nodo.direccion, nodo.tamano)
+        base_address = min(nodo.direccion, buddy_address)
+        
+        # Generar un color único basado en la dirección base
+        if base_address not in self.colores_buddies:
+            # Usar hash para generar un color consistente
+            hash_obj = hashlib.md5(str(base_address).encode())
+            hash_val = int(hash_obj.hexdigest()[:8], 16)
+            
+            # Generar color a partir del hash (evitando colores muy claros)
+            r = (hash_val & 0xFF) % 200  # Limitar a máximo 200 para evitar colores muy claros
+            g = ((hash_val >> 8) & 0xFF) % 200
+            b = ((hash_val >> 16) & 0xFF) % 200
+            
+            self.colores_buddies[base_address] = QColor(r, g, b)
+        
+        return self.colores_buddies[base_address]
 
     def paintEvent(self, event):
         sys: Optional[SistemaBuddy] = self.get_sistema()
@@ -239,7 +277,8 @@ class MemoriaView(QWidget):
 
             # Color/estilo según estado
             if nodo.ocupado:
-                painter.setBrush(QBrush(Qt.GlobalColor.darkCyan))
+                color = self.obtener_color_para_bloque(nodo)
+                painter.setBrush(QBrush(color))
             else:
                 # Libre: hacer un rayado
                 painter.setBrush(Qt.BrushStyle.Dense4Pattern)
