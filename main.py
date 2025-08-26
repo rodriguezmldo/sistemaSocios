@@ -342,10 +342,11 @@ class MemoriaView(QWidget):
             info = []
             if nodo.ocupado and nodo.proceso:
                 info.append(f"{nodo.proceso}")
-                info.append(f"{nodo.tamOcupado}/{nodo.tamano}")
+                info.append(f"{formatear_tamano(nodo.tamOcupado)}/{formatear_tamano(nodo.tamano)}")
             else:
                 info.append("LIBRE")
-                info.append(f"{nodo.tamano}")
+                info.append(f"{formatear_tamano(nodo.tamano)}")
+
             texto = "\n".join(info)
             painter.drawText(bloque, Qt.AlignmentFlag.AlignCenter, texto)
 
