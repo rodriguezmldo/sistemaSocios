@@ -55,6 +55,31 @@ class PowerOfTwoSpinBox(QSpinBox):
             return (QValidator.State.Invalid, text, pos)
 
 
+# =========================
+#           UNIDADES
+# =========================
+
+def convertir_a_bytes(valor: int, unidad: str) -> int:
+    if unidad == "KB":
+        return valor * 1024
+    elif unidad == "MB":
+        return valor * 1024 * 1024
+    elif unidad == "GB":
+        return valor * 1024 * 1024 * 1024
+    else:  # Bytes
+        return valor
+
+def formatear_tamano(bytes_val: int) -> str:
+    if bytes_val >= 1024*1024*1024:
+        return f"{bytes_val // (1024*1024*1024)} GB"
+    elif bytes_val >= 1024*1024:
+        return f"{bytes_val // (1024*1024)} MB"
+    elif bytes_val >= 1024:
+        return f"{bytes_val // 1024} KB"
+    else:
+        return f"{bytes_val} B"
+
+
 
 # =========================
 #   LÓGICA DEL BUDDY SYSTEM
@@ -329,9 +354,6 @@ class MemoriaView(QWidget):
         painter.end()
 
 
-# =========================
-#   APLICACIÓN / INTERFAZ
-# =========================
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -347,20 +369,33 @@ class MainWindow(QMainWindow):
         # --- Panel de inicialización ---
         init_group = QGroupBox("Inicialización del Sistema")
         f = QFormLayout()
-      # SpinBox especiales que avanzan en potencias de 2
+
+        # SpinBox + Unidad
         self.spin_total = PowerOfTwoSpinBox()
         self.spin_total.setValue(1024)
-        self.spin_total.setToolTip("Tamaño total de la memoria (solo potencias de 2).")
+        self.combo_total_unit = QComboBox()
+        self.combo_total_unit.addItems(["B", "KB", "MB", "GB"])
+        self.combo_total_unit.setCurrentText("KB")
 
         self.spin_min = PowerOfTwoSpinBox()
         self.spin_min.setValue(32)
-        self.spin_min.setToolTip("Tamaño mínimo de bloque (solo potencias de 2).")
+        self.combo_min_unit = QComboBox()
+        self.combo_min_unit.addItems(["B", "KB", "MB", "GB"])
+        self.combo_min_unit.setCurrentText("B")
 
         btn_init = QPushButton("Inicializar")
         btn_init.clicked.connect(self.on_inicializar)
 
-        f.addRow("Memoria total:", self.spin_total)
-        f.addRow("Bloque mínimo:", self.spin_min)
+        row_total = QHBoxLayout()
+        row_total.addWidget(self.spin_total)
+        row_total.addWidget(self.combo_total_unit)
+
+        row_min = QHBoxLayout()
+        row_min.addWidget(self.spin_min)
+        row_min.addWidget(self.combo_min_unit)
+
+        f.addRow("Memoria total:", row_total)
+        f.addRow("Bloque mínimo:", row_min)
         f.addRow(btn_init)
         init_group.setLayout(f)
 
@@ -370,9 +405,18 @@ class MainWindow(QMainWindow):
 
         self.edit_nombre = QLineEdit()
         self.edit_nombre.setPlaceholderText("Nombre del proceso (p.ej. A, B, Juego, etc.)")
+
+        # SpinBox + Unidad
         self.edit_tamano = QSpinBox()
         self.edit_tamano.setRange(1, 1_073_741_824)
         self.edit_tamano.setValue(200)
+        self.combo_proc_unit = QComboBox()
+        self.combo_proc_unit.addItems(["B", "KB", "MB", "GB"])
+        self.combo_proc_unit.setCurrentText("B")
+
+        row_proc = QHBoxLayout()
+        row_proc.addWidget(self.edit_tamano)
+        row_proc.addWidget(self.combo_proc_unit)
 
         btn_add = QPushButton("Asignar proceso")
         btn_add.clicked.connect(self.on_asignar)
@@ -383,7 +427,7 @@ class MainWindow(QMainWindow):
         btn_free.clicked.connect(self.on_liberar)
 
         ops_layout.addRow("Nombre:", self.edit_nombre)
-        ops_layout.addRow("Tamaño solicitado:", self.edit_tamano)
+        ops_layout.addRow("Tamaño solicitado:", row_proc)
         ops_layout.addRow(btn_add)
 
         ops_layout.addRow(QLabel("\nEliminar proceso:"))
@@ -422,8 +466,9 @@ class MainWindow(QMainWindow):
         return self.sistema
 
     def on_inicializar(self):
-        total = int(self.spin_total.value())
-        minbloq = int(self.spin_min.value())
+        # Convertir a bytes
+        total = convertir_a_bytes(self.spin_total.value(), self.combo_total_unit.currentText())
+        minbloq = convertir_a_bytes(self.spin_min.value(), self.combo_min_unit.currentText())
 
         # Ajuste a potencias de 2 y validaciones
         total_pow2 = SistemaBuddy.obtener_potencia_requerida(total)
@@ -432,13 +477,6 @@ class MainWindow(QMainWindow):
         if min_pow2 > total_pow2:
             QMessageBox.warning(self, "Valores inválidos", "El bloque mínimo no puede ser mayor que la memoria total.")
             return
-
-        if not SistemaBuddy.es_potencia_de_2(total):
-            QMessageBox.information(self, "Ajuste realizado",
-                                    f"Memoria total {total} ajustada a potencia de 2: {total_pow2}")
-        if not SistemaBuddy.es_potencia_de_2(minbloq):
-            QMessageBox.information(self, "Ajuste realizado",
-                                    f"Bloque mínimo {minbloq} ajustado a potencia de 2: {min_pow2}")
 
         self.sistema = SistemaBuddy(total_pow2, min_pow2)
         self.actualizar_ui()
@@ -449,13 +487,12 @@ class MainWindow(QMainWindow):
             return
 
         nombre = self.edit_nombre.text().strip()
-        tam = int(self.edit_tamano.value())
+        tam = convertir_a_bytes(self.edit_tamano.value(), self.combo_proc_unit.currentText())
 
         if not nombre:
             QMessageBox.warning(self, "Dato faltante", "Ingresa un nombre para el proceso.")
             return
 
-        
         if nombre in self.sistema.procesos_vigentes():
             QMessageBox.warning(self, "Duplicado", f"Ya existe un proceso con el nombre '{nombre}'.")
             return
@@ -468,7 +505,6 @@ class MainWindow(QMainWindow):
             )
 
         self.actualizar_ui()
-
 
     def on_liberar(self):
         if not self.sistema:
@@ -484,15 +520,14 @@ class MainWindow(QMainWindow):
         self.actualizar_ui()
 
     def actualizar_ui(self):
-        # Actualiza combo de procesos, etiqueta de desperdicio y redibuja
         if self.sistema:
             procesos = self.sistema.procesos_vigentes()
             self.combo_borrar.clear()
             self.combo_borrar.addItems(procesos)
-            desperdicio = self.sistema.memoria_desperdiciada()
+            desperdicio = formatear_tamano(self.sistema.memoria_desperdiciada())
             self.lbl_frag.setText(f"Desperdicio: {desperdicio}")
             self.lbl_estado.setText(
-                f"Total: {self.sistema.total} | Mín. bloque: {self.sistema.min_bloque}"
+                f"Total: {formatear_tamano(self.sistema.total)} | Mín. bloque: {formatear_tamano(self.sistema.min_bloque)}"
             )
         else:
             self.combo_borrar.clear()
@@ -500,6 +535,21 @@ class MainWindow(QMainWindow):
             self.lbl_estado.setText("Sin inicializar")
 
         self.mem_view.update()
+
+
+# -------- Funciones auxiliares --------
+def convertir_a_bytes(valor: int, unidad: str) -> int:
+    factor = {"B": 1, "KB": 1024, "MB": 1024**2, "GB": 1024**3}
+    return valor * factor[unidad]
+
+
+def formatear_tamano(bytes_val: int) -> str:
+    for unidad in ["B", "KB", "MB", "GB"]:
+        if bytes_val < 1024 or unidad == "GB":
+            return f"{bytes_val:.0f} {unidad}"
+        bytes_val /= 1024
+
+
 
 
 # =========================
