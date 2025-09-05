@@ -32,8 +32,6 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QValidator
 import math
 
-
-
 from PyQt6.QtCore import QTimer
 import random, json
 
@@ -41,16 +39,24 @@ class Simulador:
     def __init__(self, sistema, actualizar_ui):
         self.sistema = sistema
         self.actualizar_ui = actualizar_ui
+        self.tamanoMemoria = 1024
         self.procesos = self.generar_procesos(200)
         self.index = 0  # posición en la lista de procesos
 
     def generar_procesos(self, n=200):
-        unidades = ["B", "KB", "MB"]
         procesos = []
         for i in range(n):
             nombre = f"P{i+1}"
-            tamano = random.randint(1, 2048)
-            unidad = random.choice(unidades)
+
+            r = random.random()  # una sola vez
+            if r < 0.8:  # 80% de probabilidad
+                tamano = random.randint(1, 512)
+            elif r < 0.15:  # 15% de probabilidad
+                tamano = random.randint(513, 1024)
+            else:  # 5% de probabilidad
+                tamano = random.randint(1025, 2048)
+
+            unidad = "KB"
             procesos.append({"nombre": nombre, "tamano": tamano, "unidad": unidad})
 
         # Guardar en archivo JSON
@@ -94,12 +100,6 @@ class Simulador:
         if ok:
             print(f"[-] Liberado {nombre} después de {t/1000:.1f}s")
             self.actualizar_ui()
-
-
-
-
-
-
 
 class PowerOfTwoSpinBox(QSpinBox):
     def __init__(self, *args, **kwargs):
@@ -451,7 +451,7 @@ class MainWindow(QMainWindow):
         self.spin_min.setValue(32)
         self.combo_min_unit = QComboBox()
         self.combo_min_unit.addItems(["B", "KB", "MB", "GB"])
-        self.combo_min_unit.setCurrentText("B")
+        self.combo_min_unit.setCurrentText("KB")
 
         btn_init = QPushButton("Inicializar y Simular")
         btn_init.clicked.connect(self.on_inicializar)
