@@ -38,11 +38,13 @@ from PyQt6.QtCore import QTimer
 import random, json
 
 class Simulador:
-    def __init__(self, sistema, actualizar_ui):
+    def __init__(self, sistema, actualizar_ui, n_procesos=200):
         self.sistema = sistema
         self.actualizar_ui = actualizar_ui
-        self.procesos = self.generar_procesos(200)
+        self.procesos = self.generar_procesos(n_procesos)
         self.index = 0  # posición en la lista de procesos
+        # Estados: "pendiente" (no intentado aún), "en ejecución", "finalizado", "no ejecutado"
+        self.estados = {p["nombre"]: "pendiente" for p in self.procesos}
 
     def generar_procesos(self, n=200):
         unidades = ["B", "KB", "MB"]
@@ -71,29 +73,39 @@ class Simulador:
         self.index += 5
 
         for p in lote:
+            # Intentamos asignar cada proceso del lote
             self.asignar_proceso(p)
 
         # esperar 1 seg y luego seguir con el siguiente lote
         QTimer.singleShot(1000, self.procesar_lote)
 
     def asignar_proceso(self, p):
+        nombre = p["nombre"]
         tam = convertir_a_bytes(p["tamano"], p["unidad"])
-        nodo = self.sistema.asignar_memoria(tam, p["nombre"])
-        if nodo:
-            print(f"[+] Asignado {p['nombre']} ({p['tamano']} {p['unidad']})")
-            self.actualizar_ui()
+        nodo = self.sistema.asignar_memoria(tam, nombre)
 
-            # liberar después de 2–4 seg
+        # Marcamos que ya fue intentado: si se asignó => "en ejecución", si no => "no ejecutado"
+        if nodo:
+            print(f"[+] Asignado {nombre} ({p['tamano']} {p['unidad']})")
+            self.estados[nombre] = "en ejecución"
+            self.actualizar_ui()
+            # Liberar después de 2–4 seg
             t = random.randint(2000, 4000)
-            QTimer.singleShot(t, lambda: self.liberar_proceso(p["nombre"], t))
+            QTimer.singleShot(t, lambda nombre=nombre, t=t: self.liberar_proceso(nombre, t))
         else:
-            print(f"[!] No se pudo asignar {p['nombre']} ({p['tamano']} {p['unidad']})")
+            print(f"[!] No se pudo asignar {nombre} ({p['tamano']} {p['unidad']})")
+            # Aumentamos el contador de "no ejecutados"
+            self.estados[nombre] = "no ejecutado"
+            self.actualizar_ui()
 
     def liberar_proceso(self, nombre, t):
         ok = self.sistema.liberar_memoria(nombre)
         if ok:
             print(f"[-] Liberado {nombre} después de {t/1000:.1f}s")
+            # Solo marcar como finalizado si estaba en ejecución (seguro)
+            self.estados[nombre] = "finalizado"
             self.actualizar_ui()
+
 
 
 
@@ -324,6 +336,21 @@ class SistemaBuddy:
         # El buddy de un bloque está en la misma posición XOR el tamaño del bloque
         return direccion ^ tamano
 
+    def memoria_ocupada(self, nodo: Optional[NodoMemoria] = None) -> int:
+        if nodo is None:
+            nodo = self.raiz
+        ocupado = 0
+        if nodo.ocupado:
+            ocupado += nodo.tamOcupado  # sumar solo lo realmente usado
+        if nodo.hijoIzquierdo:
+            ocupado += self.memoria_ocupada(nodo.hijoIzquierdo)
+        if nodo.hijoDerecho:
+            ocupado += self.memoria_ocupada(nodo.hijoDerecho)
+        return ocupado
+
+    def memoria_disponible(self) -> int:
+        return self.total - self.memoria_ocupada()
+
 
 # =========================
 #   WIDGET DE DIBUJO (BARRAS)
@@ -471,11 +498,11 @@ class MainWindow(QMainWindow):
 
         # --- Indicadores ---
         info_bar = QHBoxLayout()
-        self.lbl_estado = QLabel("Sin inicializar")
-        self.lbl_estado.setStyleSheet("font-weight: bold;")
-        self.lbl_frag = QLabel("Desperdicio: 0")
-        info_bar.addWidget(self.lbl_estado, 1)
-        info_bar.addWidget(self.lbl_frag, 0)
+        self.lbl_info = QLabel("Total: 0 | Min bloque: 0\nOcupada: 0 | Disponible: 0 | Desperdicio: 0")
+        self.lbl_info.setStyleSheet("font-weight: bold;")
+        self.lbl_info.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+
+        info_bar.addWidget(self.lbl_info, 2)
 
         # Separador
         sep = QFrame()
@@ -485,11 +512,26 @@ class MainWindow(QMainWindow):
         # --- Vista de memoria ---
         self.mem_view = MemoriaView(self.get_sistema)
 
+        # --- Listado de procesos ---
+        procesos_bar = QHBoxLayout()
+        self.lbl_total_proc = QLabel("Procesos totales: 0")
+        self.lbl_restantes = QLabel("Procesos restantes: 0")
+        self.lbl_en_ejec = QLabel("En ejecución: 0")
+        self.lbl_no_ejecutados = QLabel("No ejecutados: 0")
+        self.lbl_finalizados = QLabel("Finalizados: 0")
+
+        for lbl in [self.lbl_total_proc, self.lbl_restantes, self.lbl_en_ejec, self.lbl_no_ejecutados, self.lbl_finalizados]:
+            lbl.setStyleSheet("font-weight: bold;")
+            procesos_bar.addWidget(lbl)
+
+
         # Ensamblar layout principal
         layout.addWidget(init_group)
         layout.addLayout(info_bar)
+        layout.addLayout(procesos_bar)   # ⬅️ Nuevo
         layout.addWidget(sep)
         layout.addWidget(self.mem_view, 1)
+
 
     # --------- Callbacks ---------
     def get_sistema(self) -> Optional[SistemaBuddy]:
@@ -518,16 +560,42 @@ class MainWindow(QMainWindow):
     def actualizar_ui(self):
         if self.sistema:
             desperdicio = formatear_tamano(self.sistema.memoria_desperdiciada())
-            self.lbl_frag.setText(f"Desperdicio: {desperdicio}")
-            self.lbl_estado.setText(
-                f"Total: {formatear_tamano(self.sistema.total)} | "
-                f"Mín. bloque: {formatear_tamano(self.sistema.min_bloque)}"
+            ocupada = formatear_tamano(self.sistema.memoria_ocupada())
+            disponible = formatear_tamano(self.sistema.memoria_disponible())
+
+            self.lbl_info.setText(
+                f"Total: {formatear_tamano(self.sistema.total)} | Min bloque: {formatear_tamano(self.sistema.min_bloque)}\n"
+                f"Ocupada: {ocupada} | Disponible: {disponible} | Desperdicio: {desperdicio}"
             )
+
+            
+
+            # --- Actualizar procesos ---
+            if self.simulador:
+                estados = self.simulador.estados
+                total = len(estados)  # procesos totales (fijo)
+
+                pendientes = sum(1 for e in estados.values() if e == "pendiente")
+                en_ejec = sum(1 for e in estados.values() if e == "en ejecución")
+                finalizados = sum(1 for e in estados.values() if e == "finalizado")
+                no_ejecutados = sum(1 for e in estados.values() if e == "no ejecutado")
+
+                # "Procesos restantes" = pendientes (los que aún no se intentaron)
+                restantes = pendientes
+
+                self.lbl_total_proc.setText(f"Procesos totales: {total}")
+                self.lbl_restantes.setText(f"Procesos restantes: {restantes}")
+                self.lbl_en_ejec.setText(f"En ejecución: {en_ejec}")
+                self.lbl_no_ejecutados.setText(f"No ejecutados: {no_ejecutados}")
+                self.lbl_finalizados.setText(f"Finalizados: {finalizados}")
+
+
         else:
-            self.lbl_frag.setText("Desperdicio: 0")
+            self.lbl_info.setText("Desperdicio: 0")
             self.lbl_estado.setText("Sin inicializar")
 
         self.mem_view.update()
+
 
 
 
