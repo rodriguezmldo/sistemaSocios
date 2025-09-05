@@ -51,7 +51,9 @@ class Simulador:
 
             r = random.random()  # una sola vez
             if r < 0.8:  # 80% de probabilidad
-                tamano = random.randint(1, 512)
+                tamano = random.randint(1, 256)
+            elif r < 0.3:
+                tamano = random.randint(257, 512)
             elif r < 0.15:  # 15% de probabilidad
                 tamano = random.randint(513, 1024)
             else:  # 5% de probabilidad
